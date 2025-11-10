@@ -666,13 +666,12 @@ Jika tidak bisa host cloud backend tapi butuh web app di cloud:
 ### Ready to implement?
 
 1. **Architecture 1 (Local):** Lihat [JavaScript Integration Guide](./javascript-vanilla.md)
-2. **Architecture 2 (Cloud+Backend):** Lihat [Agent-Based Integration Spec](../../docs/AGENT_BASED_INTEGRATION.md)
+2. **Architecture 2 (Cloud+Backend):** Coming soon - Agent-Based Integration Spec
 3. **Architecture 6 (SSL/WSS):** Lihat [SSL Setup Guide](./ssl-setup.md) ⭐ NEW
 4. **Architecture 5 (Tunnel):** Lihat [Quick Start Guide](../getting-started/quick-start.md)
 
 ### Need more details?
 
-- [Complete Architecture Guide](../../docs/INTEGRATION_ARCHITECTURES.md) - Detail lengkap semua arsitektur
 - [SSL Setup Guide](./ssl-setup.md) - Setup HTTPS/WSS (QZ Tray style) ⭐ NEW
 - [API Reference](../api-reference/rest-api.md) - REST API documentation
 - [WebSocket Events](../api-reference/websocket.md) - Real-time events
