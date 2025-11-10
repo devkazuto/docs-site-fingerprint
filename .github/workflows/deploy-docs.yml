@@ -5,7 +5,13 @@ on:
     branches:
       - main
     paths:
-      - 'docs-site/**'
+      - 'docs/**'
+      - 'src/**'
+      - 'static/**'
+      - 'docusaurus.config.js'
+      - 'sidebars.js'
+      - 'package.json'
+      - 'package-lock.json'
       - '.github/workflows/deploy-docs.yml'
   workflow_dispatch:
 
@@ -32,24 +38,20 @@ jobs:
         with:
           node-version: '18'
           cache: 'npm'
-          cache-dependency-path: docs-site/package-lock.json
+          cache-dependency-path: package-lock.json
       
       - name: Install dependencies
-        run: |
-          cd docs-site
-          npm ci
+        run: npm ci
       
       - name: Build documentation
-        run: |
-          cd docs-site
-          npm run build
+        run: npm run build
         env:
           NODE_ENV: production
       
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: docs-site/build
+          path: build
 
   deploy:
     environment:
