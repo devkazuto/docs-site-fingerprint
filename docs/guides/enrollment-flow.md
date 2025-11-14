@@ -14,32 +14,39 @@ Fingerprint enrollment is the process of capturing and storing a user's fingerpr
 
 ```mermaid
 sequenceDiagram
-    participant Client as Client Application
-    participant API as Fingerprint API
+    participant User as User
+    participant Browser as Browser
+    participant Service as Local Service<br/>(wss://localhost:8080)
     participant Device as Fingerprint Reader
+    participant Backend as Your Backend
     participant DB as Your Database
 
-    Client->>API: POST /api/fingerprint/enroll
-    API->>Device: Initialize enrollment session
-    Device-->>API: Session ready
-    API-->>Client: Waiting for scan 1/3
+    Browser->>Service: POST /api/fingerprint/enroll
+    Service->>Device: Initialize enrollment session
+    Device-->>Service: Session ready
+    Service->>Browser: WS: Waiting for scan 1/3
     
     Note over Device: User places finger
-    Device->>API: Scan 1 captured (quality: 85)
-    API-->>Client: Scan 1/3 complete
+    Device->>Service: Scan 1 captured (quality: 85)
+    Service->>Browser: WS: Scan 1/3 complete
+    Browser-->>User: Update UI "Scan 1/3"
     
     Note over Device: User places finger again
-    Device->>API: Scan 2 captured (quality: 88)
-    API-->>Client: Scan 2/3 complete
+    Device->>Service: Scan 2 captured (quality: 88)
+    Service->>Browser: WS: Scan 2/3 complete
+    Browser-->>User: Update UI "Scan 2/3"
     
     Note over Device: User places finger again
-    Device->>API: Scan 3 captured (quality: 90)
-    API->>API: Merge 3 scans into template
-    API-->>Client: Enrollment complete (template, quality: 92)
+    Device->>Service: Scan 3 captured (quality: 90)
+    Service->>Service: Merge 3 scans into template
+    Service->>Browser: WS: Enrollment complete<br/>(template, quality: 92)
+    Browser-->>User: Show success
     
-    Client->>DB: Store template with userId
-    DB-->>Client: Template saved
-    Client-->>Client: Show success message
+    Browser->>Backend: POST /api/users/:id/fingerprint<br/>{template, quality}
+    Backend->>DB: Store template with userId
+    DB-->>Backend: Template saved
+    Backend-->>Browser: Success
+    Browser-->>User: "Enrollment complete!"
 ```
 
 ## Step-by-Step Implementation
@@ -73,12 +80,13 @@ async function checkDeviceAvailability() {
 
 ### Step 2: Start Enrollment Process
 
-Initiate the enrollment process with the user's ID and optional device selection.
+Initiate the enrollment process with the user's ID and optional device selection. Use HTTPS for secure connection.
 
 ```javascript
 async function startEnrollment(userId, deviceId = null) {
   try {
-    const response = await fetch('http://localhost:8080/api/fingerprint/enroll', {
+    // Use HTTPS (not HTTP) for secure connection
+    const response = await fetch('https://localhost:8080/api/fingerprint/enroll', {
       method: 'POST',
       headers: {
         'X-API-Key': 'your-api-key',
@@ -109,7 +117,7 @@ async function startEnrollment(userId, deviceId = null) {
 
 ### Step 3: Monitor Enrollment Progress
 
-The enrollment process requires 3 scans. Use WebSocket events to provide real-time feedback to users.
+The enrollment process requires 3 scans. Use WebSocket Secure (WSS) events to provide real-time feedback to users.
 
 ```javascript
 function monitorEnrollmentProgress(ws, onProgress, onComplete, onError) {
@@ -151,6 +159,22 @@ function monitorEnrollmentProgress(ws, onProgress, onComplete, onError) {
     }
   };
 }
+
+// Initialize WebSocket connection with WSS
+function connectWebSocket() {
+  // Use WSS (not WS) for secure connection
+  const ws = new WebSocket('wss://localhost:8080/ws');
+  
+  ws.onopen = () => {
+    console.log('Connected to fingerprint service via WSS');
+  };
+  
+  ws.onerror = (error) => {
+    console.error('WebSocket error:', error);
+  };
+  
+  return ws;
+}
 ```
 
 ### Step 4: Handle Quality Validation
@@ -185,25 +209,45 @@ function validateEnrollmentQuality(quality, minQuality = 60) {
 
 ### Step 5: Store Template Securely
 
-After successful enrollment, store the template in your database with proper security measures.
+After successful enrollment, store the template in your backend database with proper security measures.
 
 ```javascript
 async function storeEnrollmentTemplate(userId, enrollmentData) {
   try {
-    // Store in your database
-    await database.users.update(userId, {
-      fingerprintTemplate: enrollmentData.template,
-      fingerprintQuality: enrollmentData.quality,
-      enrollmentDate: new Date().toISOString(),
-      enrollmentId: enrollmentData.enrollmentId
+    // Send template to YOUR backend API (not the local service)
+    const response = await fetch('https://your-backend.com/api/users/' + userId + '/fingerprint', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + yourAuthToken
+      },
+      body: JSON.stringify({
+        template: enrollmentData.template,
+        quality: enrollmentData.quality,
+        enrollmentDate: new Date().toISOString(),
+        enrollmentId: enrollmentData.enrollmentId
+      })
     });
     
+    if (!response.ok) {
+      throw new Error('Failed to store template');
+    }
+    
+    const result = await response.json();
+    
     // Log the enrollment event
-    await database.auditLog.create({
-      userId: userId,
-      action: 'fingerprint_enrolled',
-      quality: enrollmentData.quality,
-      timestamp: new Date().toISOString()
+    await fetch('https://your-backend.com/api/audit-log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + yourAuthToken
+      },
+      body: JSON.stringify({
+        userId: userId,
+        action: 'fingerprint_enrolled',
+        quality: enrollmentData.quality,
+        timestamp: new Date().toISOString()
+      })
     });
     
     return { success: true };

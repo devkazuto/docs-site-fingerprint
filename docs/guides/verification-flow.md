@@ -15,32 +15,38 @@ Fingerprint verification is a **1:1 matching process** where you verify that a c
 ```mermaid
 sequenceDiagram
     participant User as User
-    participant Client as Client Application
-    participant API as Fingerprint API
+    participant Browser as Browser
+    participant Service as Local Service<br/>(wss://localhost:8080)
     participant Device as Fingerprint Reader
+    participant Backend as Your Backend
     participant DB as Your Database
 
-    User->>Client: Enter username/ID
-    Client->>DB: Retrieve stored template for user
-    DB-->>Client: Return template
+    User->>Browser: Enter username/ID
+    Browser->>Backend: GET /api/users/:id/fingerprint
+    Backend->>DB: Retrieve stored template for user
+    DB-->>Backend: Return template
+    Backend-->>Browser: Template data
     
-    Client->>API: POST /api/fingerprint/verify
-    API->>Device: Start scan
-    Device-->>API: Waiting for finger
+    Browser->>Service: POST /api/fingerprint/verify<br/>{template}
+    Service->>Device: Start scan
+    Device-->>Service: Waiting for finger
+    Service->>Browser: WS: Waiting for finger
     
     Note over User,Device: User places finger
-    Device->>API: Capture fingerprint
-    API->>API: Extract template from scan
-    API->>API: Compare with stored template
+    Device->>Service: Capture fingerprint
+    Service->>Service: Extract template from scan
+    Service->>Service: Compare with stored template
     
     alt Match found
-        API-->>Client: match: true, confidence: 95.5
-        Client->>DB: Log successful verification
-        Client-->>User: Authentication successful
+        Service->>Browser: WS: match: true, confidence: 95.5
+        Browser->>Backend: POST /api/audit-log<br/>{success: true}
+        Backend->>DB: Log successful verification
+        Browser-->>User: Authentication successful
     else No match
-        API-->>Client: match: false, confidence: 45.2
-        Client->>DB: Log failed verification
-        Client-->>User: Authentication failed
+        Service->>Browser: WS: match: false, confidence: 45.2
+        Browser->>Backend: POST /api/audit-log<br/>{success: false}
+        Backend->>DB: Log failed verification
+        Browser-->>User: Authentication failed
     end
 ```
 
@@ -48,26 +54,37 @@ sequenceDiagram
 
 ### Step 1: Retrieve Stored Template
 
-Before verification, retrieve the user's stored fingerprint template from your database.
+Before verification, retrieve the user's stored fingerprint template from your backend API.
 
 ```javascript
 async function getUserTemplate(userId) {
   try {
-    const user = await database.users.findById(userId);
+    // Retrieve template from YOUR backend API
+    const response = await fetch('https://your-backend.com/api/users/' + userId + '/fingerprint', {
+      method: 'GET',
+      headers: {
+        'Authorization': 'Bearer ' + yourAuthToken
+      }
+    });
     
-    if (!user) {
-      throw new Error('User not found');
+    if (!response.ok) {
+      if (response.status === 404) {
+        throw new Error('User not found');
+      }
+      throw new Error('Failed to retrieve template');
     }
     
-    if (!user.fingerprintTemplate) {
+    const data = await response.json();
+    
+    if (!data.template) {
       throw new Error('User has no fingerprint enrolled');
     }
     
     return {
-      userId: user.id,
-      template: user.fingerprintTemplate,
-      enrollmentDate: user.enrollmentDate,
-      quality: user.fingerprintQuality
+      userId: data.userId,
+      template: data.template,
+      enrollmentDate: data.enrollmentDate,
+      quality: data.quality
     };
   } catch (error) {
     console.error('Failed to retrieve template:', error);
@@ -78,12 +95,13 @@ async function getUserTemplate(userId) {
 
 ### Step 2: Initiate Verification
 
-Send the stored template to the API along with a request to capture and verify a new fingerprint.
+Send the stored template to the local service along with a request to capture and verify a new fingerprint. Use HTTPS for secure connection.
 
 ```javascript
 async function verifyFingerprint(userId, template, deviceId = null) {
   try {
-    const response = await fetch('http://localhost:8080/api/fingerprint/verify', {
+    // Use HTTPS (not HTTP) for secure connection to local service
+    const response = await fetch('https://localhost:8080/api/fingerprint/verify', {
       method: 'POST',
       headers: {
         'X-API-Key': 'your-api-key',
@@ -155,19 +173,27 @@ function evaluateVerificationResult(result, minConfidence = 70) {
 
 ### Step 4: Log Verification Attempt
 
-Always log verification attempts for security auditing and troubleshooting.
+Always log verification attempts to your backend for security auditing and troubleshooting.
 
 ```javascript
 async function logVerificationAttempt(userId, result, success) {
   try {
-    await database.auditLog.create({
-      userId: userId,
-      action: 'fingerprint_verification',
-      success: success,
-      confidence: result.confidence,
-      timestamp: new Date().toISOString(),
-      ipAddress: getClientIP(),
-      userAgent: getUserAgent()
+    // Send audit log to YOUR backend API
+    await fetch('https://your-backend.com/api/audit-log', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + yourAuthToken
+      },
+      body: JSON.stringify({
+        userId: userId,
+        action: 'fingerprint_verification',
+        success: success,
+        confidence: result.confidence,
+        timestamp: new Date().toISOString(),
+        ipAddress: getClientIP(),
+        userAgent: getUserAgent()
+      })
     });
   } catch (error) {
     console.error('Failed to log verification:', error);
@@ -405,21 +431,22 @@ const adaptiveThreshold = calculateAdaptiveThreshold(70, riskFactors);
 console.log(`Using adaptive threshold: ${adaptiveThreshold}%`);
 ```
 
-## Real-Time Verification with WebSocket
+## Real-Time Verification with WebSocket Secure (WSS)
 
-For better user experience, use WebSocket for real-time feedback during verification:
+For better user experience, use WebSocket Secure (WSS) for real-time feedback during verification:
 
 ```javascript
 class RealtimeVerification {
   constructor(apiKey) {
-    this.ws = new WebSocket('ws://localhost:8080');
+    // Use WSS (not WS) for secure connection
+    this.ws = new WebSocket('wss://localhost:8080/ws');
     this.apiKey = apiKey;
     this.setupListeners();
   }
   
   setupListeners() {
     this.ws.onopen = () => {
-      console.log('WebSocket connected');
+      console.log('WebSocket connected via WSS');
       this.ws.send(JSON.stringify({
         type: 'auth',
         apiKey: this.apiKey
@@ -429,6 +456,10 @@ class RealtimeVerification {
     this.ws.onmessage = (event) => {
       const data = JSON.parse(event.data);
       this.handleMessage(data);
+    };
+    
+    this.ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
     };
   }
   
@@ -497,13 +528,22 @@ class RealtimeVerification {
 const verifier = new RealtimeVerification('your-api-key');
 
 try {
+  // Get template from YOUR backend
   const userData = await getUserTemplate('user-12345');
+  
+  // Verify with local service
   const result = await verifier.verify('user-12345', userData.template);
   
   if (result.success) {
     console.log(`Verified! Confidence: ${result.confidence}%`);
+    
+    // Log to YOUR backend
+    await logVerificationAttempt('user-12345', result, true);
   } else {
     console.log('Verification failed');
+    
+    // Log to YOUR backend
+    await logVerificationAttempt('user-12345', result, false);
   }
 } catch (error) {
   console.error('Verification error:', error);
