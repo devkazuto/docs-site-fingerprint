@@ -182,7 +182,7 @@ sequenceDiagram
     Backend-->>Browser: Confirmation
     Browser-->>User: "Enrollment complete!"
     
-    Note over User,DB: Fingerprint Verification (Later)
+    Note over User,DB: Fingerprint Verification - 1:1 (Later)
     User->>Browser: Click "Login with Fingerprint"
     Browser->>Backend: GET /api/users/:id/fingerprint
     Backend->>DB: Retrieve template
@@ -197,13 +197,79 @@ sequenceDiagram
     Browser-->>User: "Login successful!"
 ```
 
+### Identification Flow (1:N Matching)
+
+For scenarios where you need to identify a user from a database of fingerprints without knowing their identity beforehand:
+
+```mermaid
+sequenceDiagram
+    participant User as User
+    participant Browser as Browser
+    participant Service as Local Service<br/>(wss://localhost:8080)
+    participant Device as FP Reader
+    participant Backend as Your Backend<br/>(Cloud)
+    participant DB as Your Database
+    
+    Note over User,DB: Fingerprint Identification (1:N)
+    User->>Browser: Place finger on reader
+    Browser->>Service: POST /api/fingerprint/capture
+    Service->>Device: Capture fingerprint
+    
+    Device-->>Service: Fingerprint detected
+    Service->>Browser: WS: event "detected"
+    Browser-->>User: Update UI "Scanning..."
+    
+    Device-->>Service: Fingerprint captured
+    Service->>Service: Extract template
+    Service->>Browser: Result {template}
+    Browser-->>User: "Fingerprint captured"
+    
+    Note over User,DB: Search in Database
+    Browser->>Backend: POST /api/fingerprint/identify<br/>{template}
+    Backend->>DB: Get all user templates
+    DB-->>Backend: List of templates
+    
+    Backend->>Backend: Compare captured template<br/>with all stored templates
+    
+    alt Match Found
+        Backend->>Backend: Find best match<br/>(highest confidence)
+        Backend-->>Browser: {userId, name, confidence: 92}
+        Browser->>Backend: GET /api/users/:id
+        Backend->>DB: Get user details
+        DB-->>Backend: User data
+        Backend-->>Browser: User profile
+        Browser-->>User: "Welcome, John Doe!"
+        
+        Browser->>Backend: POST /api/audit-log<br/>{userId, action: "identified"}
+        Backend->>DB: Log identification
+    else No Match
+        Backend-->>Browser: {match: false}
+        Browser-->>User: "User not found"
+        
+        Browser->>Backend: POST /api/audit-log<br/>{action: "identification_failed"}
+        Backend->>DB: Log failed attempt
+    end
+```
+
+**Key Differences (1:1 vs 1:N):**
+
+| Feature | Verification (1:1) | Identification (1:N) |
+|---------|-------------------|---------------------|
+| **User Identity** | Known beforehand | Unknown |
+| **Template Retrieval** | Single template from backend | All templates from backend |
+| **Comparison** | Local service compares 1:1 | Backend compares 1:N |
+| **Performance** | Fast (single comparison) | Slower (multiple comparisons) |
+| **Use Case** | Login with username + fingerprint | Login with fingerprint only |
+| **Scalability** | Excellent | Limited by database size |
+
 **Key Interactions:**
 
 1. **One-Time Setup**: User installs service and SSL certificate (requires admin once)
 2. **Direct Connection**: Browser connects directly to local service via WSS (no intermediary)
 3. **Real-Time Events**: Events flow directly from service to browser via WebSocket
 4. **Template Storage**: Your backend stores templates (service doesn't store anything)
-5. **Verification**: Browser retrieves template from your backend, sends to service for comparison
+5. **Verification (1:1)**: Browser retrieves specific template from backend, service compares locally
+6. **Identification (1:N)**: Service captures fingerprint, backend searches all templates for match
 
 ## Key Features
 
